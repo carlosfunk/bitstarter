@@ -24,7 +24,7 @@
 var fs = require('fs');
 var program = require('commander');
 var cheerio = require('cheerio');
-var HTMLFILE_DEFAULT = "index.html";
+var rest = require('restler');
 var CHECKSFILE_DEFAULT = "checks.json";
 
 var assertFileExists = function (infile) {
@@ -36,23 +36,23 @@ var assertFileExists = function (infile) {
     return instr;
 };
 
-var cheerioHtmlFile = function (htmlfile) {
-    return cheerio.load(fs.readFileSync(htmlfile));
-};
-
 var loadChecks = function (checksfile) {
     return JSON.parse(fs.readFileSync(checksfile));
 };
 
 var checkHtmlFile = function (htmlfile, checksfile) {
-    $ = cheerioHtmlFile(htmlfile);
+    return checkHtml(fs.readFileSync(htmlfile), checksfile);
+};
+
+var checkHtml = function (html, checksfile) {
+    $ = cheerio.load(html);
     var checks = loadChecks(checksfile).sort();
     var out = {};
     for (var ii in checks) {
         out[checks[ii]] = $(checks[ii]).length > 0;
     }
     return out;
-};
+}
 
 var clone = function (fn) {
     // Workaround for commander.js issue.
@@ -60,14 +60,35 @@ var clone = function (fn) {
     return fn.bind({});
 };
 
+var buildfn = function(checksfile) {
+    var responseCheck = function(result, response) {
+        if (result instanceof Error) {
+            console.error('Error: ' + util.format(response.message));
+        } else {
+            var checkJson = checkHtml(result, checksfile);
+            var outJson = JSON.stringify(checkJson, null, 4);
+            console.log(outJson);
+        }
+    };
+    return responseCheck;
+};
+
 if (require.main == module) {
     program
         .option('-c, --checks <check_file>', 'Path to checks.json', clone(assertFileExists), CHECKSFILE_DEFAULT)
-        .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists), HTMLFILE_DEFAULT)
+        .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists))
+        .option('-u, --url <url>', 'Path to url')
         .parse(process.argv);
-    var checkJson = checkHtmlFile(program.file, program.checks);
-    var outJson = JSON.stringify(checkJson, null, 4);
-    console.log(outJson);
+    if (program.url) {
+        responseCheck = buildfn(program.checks);
+        rest.get(program.url).on('complete', responseCheck);
+    } else if (program.file && assertFileExists(program.file)) {
+        checkJson = checkHtmlFile(program.file, program.checks);
+        var outJson = JSON.stringify(checkJson, null, 4);
+        console.log(outJson);
+    } else {
+        console.error("Must supply a valid file or url")
+    }
 } else {
     exports.checkHtmlFile = checkHtmlFile;
 }
